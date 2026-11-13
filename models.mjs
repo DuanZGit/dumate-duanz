@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { homedir } from "node:os"
 import { randomUUID } from "node:crypto"
 import { discoverConfig } from "./paths.mjs"
-import { label as catalogLabel } from "./catalog.mjs"
+import { label as catalogLabel, costOf as catalogCost } from "./catalog.mjs"
 
 const validId = (id) => typeof id === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(id)
 const positive = (n) => Number.isSafeInteger(n) && n > 0
@@ -37,6 +37,10 @@ export function importModels(config) {
     if (!positive(context) || !positive(output)) continue
     const input = modalities(value.modalities?.input)
     if (!input.includes("text")) continue
+    // Price in USD per 1M tokens, derived from the measured points rate so
+    // magpie can show its own cost ratio. Undefined (auto-routed aliases,
+    // unmeasured ids) leaves it to models.dev rather than inventing a number.
+    const cost = catalogCost(id)
     models[key] = {
       id,
       name: catalogLabel(id, key === id ? key : `${key} (API: ${id})`),
@@ -46,6 +50,7 @@ export function importModels(config) {
       attachment: input.some((x) => x !== "text"),
       modalities: { input, output: ["text"] },
     }
+    if (cost) models[key].cost = cost
   }
   if (!Object.keys(models).length) throw new Error("No chat models in DuMate catalog")
   return { schema: 1, models, excluded }

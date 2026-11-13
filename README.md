@@ -44,36 +44,52 @@ magpie plugin login dumate
 
 没有激活账号信息时，只在唯一账号目录存在的情况下自动选择；多个账号不猜测。可用 `DUMATE_OPENCODE_CONFIG` 指定配置文件的绝对路径。Linux 默认路径和 Windows APPDATA 路径经过离线测试；真实客户端登录验证仅在 macOS 完成。
 
-## 模型名与积分倍率
+## 模型名与价格
 
-`catalog.mjs` 把网关返回的模型 id 映射成可读名并附上倍率，`models.mjs` 在生成模型清单时使用它。倍率 = 该模型每千 output token 消耗的积分 ÷ DeepSeek-V4.1 Flash 的同一数值。
+`catalog.mjs` 把网关返回的模型 id 映射成可读名，并把每个模型的价格写进 `cost`（USD / 百万 token）。**倍率不由本插件给出**——magpie 自己按 `cost` 算它那套 ×N 比值，和任何其它 provider 放在一起比。
 
-实测值（2026-11-13，以 DeepSeek-V4.1 Flash = 2.00 积分/千 output token = 100% 为基准）：
+百度文档只写“模型调用消耗…统一折算为积分”，没有任何 per-model 积分表，客户端界面也不展示倍率。所以插件不编造倍率，只把手里的两个事实交出去：实测的积分扣减量，和一个把积分换成钱的单价。
 
-| 模型 | 显示名 | 倍率 |
+### 积分换算成美元
+
+```
+Pro: ¥59 / 25000 积分  →  每积分 ¥0.00236
+汇率 7.10              →  每积分 ≈ $0.000332
+cost(USD/M) = 积分每千 token × 1000 × 0.000332
+```
+
+两个常量是假设：¥59/25000 来自产品计费页的 Pro 档，Max 档或兑换券单价不同；汇率是当日的。它们不需要精确——magpie 的倍率是相对值，所有模型用同一个系数，比值就成立。
+
+### 实测积分（2026-11-13）
+
+每千 **output** token 消耗的积分。这些是价格的唯一依据，方法：对真实网关打两次不同长度的调用，从 `usedPoints` 差值解斜率。
+
+| 模型 | id | 积分/千 output |
 | --- | --- | --- |
-| kimi-k3 | Kimi K3 | 312% |
-| qwen2.5-vl-32b-instruct | Qwen2.5-VL-32B | 101% |
-| model-text | 自动路由（默认） | 101% |
-| deepseek-v4-flash-0731 | DeepSeek-V4-Flash-0731 | 100% |
-| deepseek-v41-flash | DeepSeek-V4.1 Flash | 100% |
-| ernie-4.5-turbo-vl-32k | 文心 ERNIE-4.5 Turbo VL | 100% |
-| qwen3.8-max | Qwen3.8 Max | 95% |
-| doubao-seed-2-0-pro | 豆包 Seed 2.0 Pro | 9.7% |
-| glm-53-flash | GLM-5.3 Flash | 6.1% |
-| kimi-k31 | Kimi K3.1 | 5.9% |
-| qwen38-flash | Qwen3.8 Flash | 5.0% |
-| deepseek-v4-pro | DeepSeek-V4 Pro | 5.0% |
-| qwen3.5-397b-a17b | Qwen3.5-397B-A17B | 4.9% |
-| glm-53 | GLM-5.3 | 4.3% |
-| qwen3.5-27b | Qwen3.5-27B | 3.4% |
-| qwen3.5-35b-a3b | Qwen3.5-35B-A3B | 2.5% |
+| Kimi K3 | `kimi-k3` | 6.235 |
+| Qwen2.5-VL-32B | `qwen2.5-vl-32b-instruct` | 2.024 |
+| 自动路由（默认） | `model-text` | 2.014 |
+| DeepSeek-V4-Flash-0731 | `deepseek-v4-flash-0731` | 2.007 |
+| DeepSeek-V4.1 Flash | `deepseek-v41-flash` | 2.000 |
+| 文心 ERNIE-4.5 Turbo VL | `ernie-4.5-turbo-vl-32k` | 1.997 |
+| Qwen3.8 Max | `qwen3.8-max` | 1.905 |
+| 豆包 Seed 2.0 Pro | `doubao-seed-2-0-pro` | 0.193 |
+| GLM-5.3 Flash | `glm-53-flash` | 0.122 |
+| Kimi K3.1 | `kimi-k31` | 0.117 |
+| Qwen3.8 Flash | `qwen38-flash` | 0.100 |
+| DeepSeek-V4 Pro | `deepseek-v4-pro` | 0.100 |
+| Qwen3.5-397B-A17B | `qwen3.5-397b-a17b` | 0.098 |
+| GLM-5.3 | `glm-53` | 0.087 |
+| Qwen3.5-27B | `qwen3.5-27b` | 0.067 |
+| Qwen3.5-35B-A3B | `qwen3.5-35b-a3b` | 0.050 |
 
-自动路由别名（`dm-auto-model/*`）不显示百分比，改显“倍率随路由”——实际模型由百度侧决定，无法预估。
+input 侧只实测了四个（DeepSeek-V4.1 Flash 0.611、Kimi K3 1.213、Qwen3.8 Max 0.625、DeepSeek-V4 Pro 0.089 积分/千），其余按 output 的 0.30 估（实测那几个的比值落在 0.305~0.328）。缓存读写网关不公布，按 input 的 10% / 100% 估。
 
-精度边界：积分余额只有两位小数，单次短调用只扣 0.03–0.07 分，所以低价档（<0.2 分/千字）的相对误差约 ±10%。要重测用 `node scripts/measure-rates.mjs <模型id>`，它读本机 `plugin-auth.json` 打两次真实调用解斜率，遇 429 自动退避。
+`dm-auto-model/*` 六个自动路由别名**不给价格**：具体模型由百度侧在请求时决定，钉一个数字就是撒谎。`model-text` 例外——它实测就是 2.014，接近 DeepSeek-V4.1 Flash。
 
-`/v1/models` 里的 `pricing` 字段是模型的美元价，与积分折算不成比例，**不要**拿它推导倍率。
+精度边界：积分余额只有两位小数，单次短调用只扣 0.03–0.07 分，低价档的相对误差约 ±10%，所以 GLM-5.3、Qwen3.5-27B 这些的价格只能当量级看。要重测用 `node scripts/measure-rates.mjs <模型id>`，它读本机 `plugin-auth.json` 打两次真实调用解斜率，遇 429 自动退避。
+
+`/v1/models` 里的 `pricing` 字段是模型的公开美元价，和积分折算不成比例，**不要**拿它当成本。
 
 ## 模型与上下文
 
