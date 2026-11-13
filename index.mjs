@@ -30,8 +30,13 @@ const CONSOLE_BASE = "https://console.bce.baidu.com"
 const LOGIN_URL = "https://login.bce.baidu.com/?from=oa_dumate&redirect=https%3A%2F%2Fconsole.bce.baidu.com%2F"
 const GATEWAY_BASE = "https://dumate-svc.baidu.com/gateway/apis/v1"
 
+// Track the newest desktop release (DuMate 文档「个人版更新动态」): it does not
+// gate the console or gateway API — 1.0.60/0.82/0.91 all answer identically —
+// but staying current keeps the client fingerprint plausible.
+const CLIENT_VERSION = "1.0.91"
+
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) DuMate/1.0.82 Chrome/130.0.0.0 Electron/33.0.0 Safari/537.36"
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) DuMate/${CLIENT_VERSION} Chrome/130.0.0.0 Electron/33.0.0 Safari/537.36`
 
 const TOKEN_TTL_MS = 60 * 60 * 1000 // refresh token hourly; server gives ~14h
 
@@ -503,32 +508,82 @@ export const DuMatePlugin = async (input = {}) => {
           if (!overview) throw overviewError ?? new Error("quota_overview 不可用")
           const total = parseFloat(overview.totalPoints) || 0
           const used = parseFloat(overview.usedPoints) || 0
-          const packs = [...(overview.subscription ?? []), ...(overview.incremental ?? [])]
+
+          // quota_overview flattens every pool into one totalPoints. This
+          // account's wallet holds 7 monthly Pro grants plus sign-in/growth
+          // top-ups, and one 5,000-point pack tagged product:"comate" — a
+          // different Baidu product sharing the same wallet. Reporting the
+          // union as "DuMate 余额" overstates what this provider can spend, so
+          // the packs are split and each pool gets its own row.
+          const subs = Array.isArray(overview.subscription) ? overview.subscription : []
+          const incs = Array.isArray(overview.incremental) ? overview.incremental : []
+          const allPacks = [...subs, ...incs]
+          const isDuMate = (p) => (p?.product ?? "dumate") === "dumate"
+          const duPacks = allPacks.filter(isDuMate)
+          const otherPacks = allPacks.filter((p) => !isDuMate(p))
+          // Only active packs are spendable. The queued monthly Pro grants
+          // (status:"inactive") are future periods — the server's totalPoints
+          // already excludes them, and counting them would report a 7x balance.
+          const activeDu = duPacks.filter((p) => p?.status === "active")
+          const sumPts = (list, key) => list.reduce((s, p) => s + (parseFloat(p?.[key]) || 0), 0)
+          const duTotal = sumPts(activeDu, "totalPoints") || total
+          const packUsed = sumPts(activeDu, "usedPoints")
+          const duUsed = packUsed > 0 ? packUsed : Math.min(used, duTotal)
+
+          // Subscription installments: only the active one is spendable, the
+          // rest are queued monthly grants. Numbering them tells the user how
+          // much runway is left beyond the current period.
+          const duSubs = subs.filter(isDuMate)
+          const activeSub = duSubs.find((p) => p?.status === "active")
+          const activeIdx = activeSub ? duSubs.indexOf(activeSub) : -1
+          const period = activeSub && duSubs.length > 1 ? `第 ${activeIdx + 1}/${duSubs.length} 期` : ""
+
+          // Earliest expiry among spendable DuMate packs. pointsExpireDate is
+          // when the points die; expireDate is when the subscription does —
+          // the points deadline is what matters for a balance.
           let soonest = null
-          for (const p of packs) {
+          for (const p of duPacks) {
             if (p?.status !== "active") continue
-            // expireDate can be null on never-expiring packs — Number(null)*1000
-            // would yield 1970, so guard it.
-            const expMs = p.expireDate == null ? NaN : Number(p.expireDate) * 1000
+            const stamp =
+              p.pointsExpireDate != null ? Number(p.pointsExpireDate) : p.expireDate == null ? NaN : Number(p.expireDate)
+            const expMs = Number.isFinite(stamp) && stamp > 0 ? stamp * 1000 : NaN
             if (!Number.isFinite(expMs) || expMs <= 0) continue
             if (!soonest || expMs < soonest.ms) soonest = { ms: expMs, points: parseFloat(p.totalPoints) || 0 }
           }
+
+          const windows = [
+            {
+              name: "DuMate 积分",
+              used: duTotal > 0 ? (100 * duUsed) / duTotal : 0,
+              display: `${duUsed.toFixed(2)} / ${duTotal.toFixed(2)}`,
+              amount: duUsed,
+              limit: duTotal,
+              unit: "points",
+              ...(soonest
+                ? { runsOutAt: new Date(soonest.ms).toISOString(), runsOut: Math.min(duTotal - duUsed, soonest.points) }
+                : {}),
+            },
+          ]
+          for (const p of otherPacks) {
+            const t = parseFloat(p.totalPoints) || 0
+            if (t <= 0) continue
+            const u = parseFloat(p.usedPoints) || 0
+            windows.push({
+              name: `${cardText(p.product) || "其他产品"} 共享积分`,
+              used: (100 * u) / t,
+              display: `${u.toFixed(2)} / ${t.toFixed(2)}`,
+              amount: u,
+              limit: t,
+              unit: "points",
+            })
+          }
+
+          const checkin = info && info.totalTimes ? `已签到 ${info.totalTimes} 天` : ""
+          const planName = overview.isSubscribed === false ? "免费版" : "Pro"
           return {
-            plan: info && info.totalTimes ? `已签到 ${info.totalTimes} 天` : "Free",
-            balance: `${(total - used).toFixed(2)} 积分`,
-            windows: [
-              {
-                name: "Points",
-                used: total > 0 ? (100 * used) / total : 0,
-                display: `${used.toFixed(2)} / ${total.toFixed(2)}`,
-                amount: used,
-                limit: total,
-                unit: "points",
-                ...(soonest
-                  ? { runsOutAt: new Date(soonest.ms).toISOString(), runsOut: Math.min(total - used, soonest.points) }
-                  : {}),
-              },
-            ],
+            plan: [planName, period, checkin].filter(Boolean).join(" · "),
+            balance: `${(duTotal - duUsed).toFixed(2)} 积分`,
+            windows,
             user: auth.name || auth.accountId || "DuMate",
             signIn: "kept",
           }

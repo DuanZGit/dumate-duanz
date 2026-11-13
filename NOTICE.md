@@ -4,4 +4,6 @@ This project is derived from [R227BOUT/magpie-dumate](https://github.com/R227BOU
 
 RanceLee233's changes add macOS/Linux path handling, active-account model discovery, an independent sanitized catalog snapshot, model context metadata, packaging and regression tests. The gateway request is restricted to Baidu's official chat endpoint and does not follow redirects.
 
+DuanZGit's changes add a model display catalog (`catalog.mjs`) with readable names and measured points ratios, point-pool-aware usage reporting that separates non-DuMate products and counts only active packs, and a UA version bump to the client release published in Baidu's documentation. The points ratios in `catalog.mjs` are measured against the live gateway, not published by Baidu.
+
 This is an unofficial community integration. It is not affiliated with or endorsed by Baidu or magpie. DuMate's name and artwork identify the upstream service; their trademarks belong to their respective owners.

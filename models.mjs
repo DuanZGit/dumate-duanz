@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { homedir } from "node:os"
 import { randomUUID } from "node:crypto"
 import { discoverConfig } from "./paths.mjs"
+import { label as catalogLabel } from "./catalog.mjs"
 
 const validId = (id) => typeof id === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/.test(id)
 const positive = (n) => Number.isSafeInteger(n) && n > 0
@@ -38,7 +39,7 @@ export function importModels(config) {
     if (!input.includes("text")) continue
     models[key] = {
       id,
-      name: key === id ? key : `${key} (API: ${id})`,
+      name: catalogLabel(id, key === id ? key : `${key} (API: ${id})`),
       limit: { context, output },
       tool_call: value.tool_call !== false,
       reasoning: id === "deepseek-v41-flash" || value.reasoning === true || value.capabilities?.reasoning === true,
@@ -66,7 +67,7 @@ function saveSnapshot(path, catalog) {
 }
 
 export function loadModels({ sourcePath, snapshotPath, stateDir, userDataDir, env = process.env } = {}) {
-  const store = join(stateDir || join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "magpie"), "dumate-rance")
+  const store = join(stateDir || join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "magpie"), "dumate-duanz")
   snapshotPath ??= join(store, "models.snapshot.json")
   sourcePath ??= discoverConfig({ userDataDir, env })
   try {

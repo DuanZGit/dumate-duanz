@@ -1,22 +1,30 @@
-# dumate-rance
+# dumate-duanz
 
-将百度搭子 DuMate 的个人积分接入 **magpie / OpenCode**。基于 [R227BOUT/magpie-dumate](https://github.com/R227BOUT/magpie-dumate) 的 MIT 版本修改，重点修复 macOS 找不到桌面登录态，以及只列出两个默认模型、缺少上下文长度的问题。
+将百度搭子 DuMate 的个人积分接入 **magpie / OpenCode**。
+
+血缘：[R227BOUT/magpie-dumate](https://github.com/R227BOUT/magpie-dumate) → [RanceLee233/dumate-rance](https://github.com/RanceLee233/dumate-rance) → 本仓库。前两层的修改见 [NOTICE.md](NOTICE.md)。
+
+本层新增：
+
+- **可读模型名 + 实测积分倍率**。`deepseek-v41-flash` 显示为 `DeepSeek-V4.1 Flash · 100%`，`glm-53-flash` 显示为 `GLM-5.3 Flash · 6.1%`。倍率是以 DeepSeek-V4.1 Flash 为 100% 基准、通过真实调用测出的每千 output token 积分消耗，不是官方数字（百度未公开 per-model 积分表）。
+- **积分分池显示**。控制器返回的 `totalPoints` 把 `product:"comate"` 的另一个产品积分也算进了总额；usage 现在按 `product` 拆成独立窗口，只统计 `status:"active"` 的包，并显示订阅是第几期、最早过期的积分何时清零。
+- **客户端版本号跟随官方**。UA 中的 `DuMate/x.y.z` 升到文档公布的最新个人版（当前 1.0.91）。
 
 **非官方实验版本。** 百度可能调整接口；目前已观察到新进程获取 gateway token 时返回“服务器内部错误”，已有进程的缓存 token 仍可调用。因此不能保证首次调用、续期或卸载客户端后的持续可用性。遇到此问题请保留 DuMate 客户端；本插件不会静默改走客户端本地代理。
 
 ## 安装与登录
 
 ```bash
-magpie plugin add github:RanceLee233/dumate-rance
-magpie plugin use github:RanceLee233/dumate-rance dumate
+magpie plugin add github:DuanZGit/dumate-duanz
+magpie plugin use github:DuanZGit/dumate-duanz dumate
 magpie plugin login dumate
 ```
 
 选择“百度搭子桌面端登录态”。请先打开 DuMate 并完成登录。已有其他 DuMate 插件时，`plugin use` 用来指定由本插件提供服务；原插件可以保留或停用，避免重复显示。
 
-插件包名是 `dumate-rance`，供应商 ID 继续使用 `dumate`，模型入口为 `dumate/<模型ID>`。这让已有客户端配置可以继续使用。
+插件包名是 `dumate-duanz`，供应商 ID 继续使用 `dumate`，模型入口为 `dumate/<模型ID>`。这让已有客户端配置可以继续使用。
 
-本地开发安装：`magpie plugin add /absolute/path/to/dumate-rance`。
+本地开发安装：`magpie plugin add /absolute/path/to/dumate-duanz`。
 
 ## 自动寻找正确位置
 
@@ -36,6 +44,37 @@ magpie plugin login dumate
 
 没有激活账号信息时，只在唯一账号目录存在的情况下自动选择；多个账号不猜测。可用 `DUMATE_OPENCODE_CONFIG` 指定配置文件的绝对路径。Linux 默认路径和 Windows APPDATA 路径经过离线测试；真实客户端登录验证仅在 macOS 完成。
 
+## 模型名与积分倍率
+
+`catalog.mjs` 把网关返回的模型 id 映射成可读名并附上倍率，`models.mjs` 在生成模型清单时使用它。倍率 = 该模型每千 output token 消耗的积分 ÷ DeepSeek-V4.1 Flash 的同一数值。
+
+实测值（2026-11-13，以 DeepSeek-V4.1 Flash = 2.00 积分/千 output token = 100% 为基准）：
+
+| 模型 | 显示名 | 倍率 |
+| --- | --- | --- |
+| kimi-k3 | Kimi K3 | 312% |
+| qwen2.5-vl-32b-instruct | Qwen2.5-VL-32B | 101% |
+| model-text | 自动路由（默认） | 101% |
+| deepseek-v4-flash-0731 | DeepSeek-V4-Flash-0731 | 100% |
+| deepseek-v41-flash | DeepSeek-V4.1 Flash | 100% |
+| ernie-4.5-turbo-vl-32k | 文心 ERNIE-4.5 Turbo VL | 100% |
+| qwen3.8-max | Qwen3.8 Max | 95% |
+| doubao-seed-2-0-pro | 豆包 Seed 2.0 Pro | 9.7% |
+| glm-53-flash | GLM-5.3 Flash | 6.1% |
+| kimi-k31 | Kimi K3.1 | 5.9% |
+| qwen38-flash | Qwen3.8 Flash | 5.0% |
+| deepseek-v4-pro | DeepSeek-V4 Pro | 5.0% |
+| qwen3.5-397b-a17b | Qwen3.5-397B-A17B | 4.9% |
+| glm-53 | GLM-5.3 | 4.3% |
+| qwen3.5-27b | Qwen3.5-27B | 3.4% |
+| qwen3.5-35b-a3b | Qwen3.5-35B-A3B | 2.5% |
+
+自动路由别名（`dm-auto-model/*`）不显示百分比，改显“倍率随路由”——实际模型由百度侧决定，无法预估。
+
+精度边界：积分余额只有两位小数，单次短调用只扣 0.03–0.07 分，所以低价档（<0.2 分/千字）的相对误差约 ±10%。要重测用 `node scripts/measure-rates.mjs <模型id>`，它读本机 `plugin-auth.json` 打两次真实调用解斜率，遇 429 自动退避。
+
+`/v1/models` 里的 `pricing` 字段是模型的美元价，与积分折算不成比例，**不要**拿它推导倍率。
+
 ## 模型与上下文
 
 读取 `provider.QianfanPersonalQuota.models`，仅导入模型元数据。不会导入其中的 API key、本地代理 URL、headers、插件、命令或权限。
@@ -49,7 +88,7 @@ magpie plugin login dumate
 
 `dumate/deepseek-v41-flash` 的渠道配置为 1,000,000 tokens 输入/上下文、384,000 tokens 最大输出，支持图像输入；这是渠道声明，没有进行百万 tokens 极限测试。该模型通过本机 magpie 的小请求已返回成功。其他模型未逐一测试。
 
-成功读取后，将纯模型清单保存到 magpie 配置目录下的 `dumate-rance/models.snapshot.json`。读取源文件失败或原文件删除时使用最近的快照；新安装且没有快照时使用包内带日期的参考清单。快照不包含 Cookie、密钥、源文件路径或 API 地址。清单回退只解决模型信息保存，不延长登录有效期。
+成功读取后，将纯模型清单保存到 magpie 配置目录下的 `dumate-duanz/models.snapshot.json`。读取源文件失败或原文件删除时使用最近的快照；新安装且没有快照时使用包内带日期的参考清单。快照不包含 Cookie、密钥、源文件路径或 API 地址。清单回退只解决模型信息保存，不延长登录有效期。
 
 ```bash
 magpie provider models dumate
