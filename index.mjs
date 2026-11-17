@@ -299,6 +299,57 @@ async function consolePost(path, body, cookies) {
   return payload?.result
 }
 
+// ---- Remote image inlining --------------------------------------------------
+
+// The gateway forwards image_url URLs to qianfan, which fetches them server-side;
+// many origins (wikimedia, hotlink-protected CDNs) refuse that fetch and the
+// whole request dies with qianfan 400 "fetch object failed". Downloading the
+// image here and sending a data URI instead moves the fetch onto this machine,
+// where it succeeds. data: URIs and failures pass through untouched.
+const INLINE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+const INLINE_IMAGE_TIMEOUT_MS = 15_000
+
+async function toDataUri(url) {
+  const res = await fetch(url, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(INLINE_IMAGE_TIMEOUT_MS),
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      Accept: "image/*,*/*;q=0.8",
+    },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim()
+  if (!type.startsWith("image/")) throw new Error(`not an image (${type || "unknown type"})`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  if (!buf.length) throw new Error("empty body")
+  if (buf.length > INLINE_IMAGE_MAX_BYTES) throw new Error(`too large (${buf.length} bytes)`)
+  return `data:${type};base64,${buf.toString("base64")}`
+}
+
+// Rewrites every message part's image_url in place: http(s) URLs are replaced
+// with data URIs when the download works, everything else is left as-is (the
+// gateway's own error is then the honest answer). Best-effort by design — a
+// dead image URL should fail like it always did, not block the chat.
+async function inlineRemoteImages(bodyText) {
+  let body
+  try { body = JSON.parse(bodyText) } catch { return bodyText }
+  if (!Array.isArray(body?.messages)) return bodyText
+  let touched = false
+  for (const msg of body.messages) {
+    if (!Array.isArray(msg?.content)) continue
+    for (const part of msg.content) {
+      const url = part?.image_url?.url
+      if (typeof url !== "string" || !/^https?:\/\//i.test(url)) continue
+      try {
+        part.image_url.url = await toDataUri(url)
+        touched = true
+      } catch {}
+    }
+  }
+  return touched ? JSON.stringify(body) : bodyText
+}
+
 // ---- Gateway token (single-flight cache) ------------------------------------
 
 const tokenCache = new Map() // cookieHeader -> { token, expiresAt, pending }
@@ -444,6 +495,7 @@ export const DuMatePlugin = async (input = {}) => {
             }
             let bodyText = init?.body
             if (bodyText === undefined && req) bodyText = await req.clone().text()
+            bodyText = await inlineRemoteImages(bodyText)
             let cred
             try {
               cred = await fetchGatewayToken(cookieHeaderOf(cookies))
