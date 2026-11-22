@@ -6,9 +6,9 @@
 
 本层新增：
 
-- **可读模型名 + 实测积分倍率**。`deepseek-v41-flash` 显示为 `DeepSeek-V4.1 Flash · 100%`，`glm-53-flash` 显示为 `GLM-5.3 Flash · 6.1%`。倍率是以 DeepSeek-V4.1 Flash 为 100% 基准、通过真实调用测出的每千 output token 积分消耗，不是官方数字（百度未公开 per-model 积分表）。
-- **积分分池显示**。控制器返回的 `totalPoints` 把 `product:"comate"` 的另一个产品积分也算进了总额；usage 现在按 `product` 拆成独立窗口，只统计 `status:"active"` 的包，并显示订阅是第几期、最早过期的积分何时清零。
-- **客户端版本号跟随官方**。UA 中的 `DuMate/x.y.z` 升到文档公布的最新个人版（当前 1.0.91）。
+- **可读模型名 + 把价格交给 magpie**。`deepseek-v41-flash` 显示为 `DeepSeek-V4.1 Flash`，`glm-53-flash` 显示为 `GLM-5.3 Flash`。插件不再自己打印倍率百分比——那是被编造的数字；它把实测积分换算成 `cost`（USD / 百万 token）交给 magpie，由 magpie 按和其它 provider 相同的方式算 ×N 比值。
+- **积分分池显示**。控制器的 `quota_overview` 把同一钱包里 `product:"comate"` 等其它产品的积分也合进了 `totalPoints`。usage 现在按 `product` 拆成独立窗口：DuMate 自己的包只统计 `status:"active"` 的（排队中的未来期次不计入，否则余额会被夸成好几倍），其它产品的共享积分单独成行、按服务器原样列出（不区分状态）；同时显示订阅是第几期、最早过期的积分何时清零。
+- **客户端版本号**。UA 中的 `DuMate/x.y.z` 目前是 `1.0.91`（官方个人版最新为 1.0.94）。版本号并不控制控制台或网关接口（1.0.60 / 0.82 / 0.91 表现一致），这里的取值只是维持一个合理的客户端指纹。
 
 **非官方实验版本。** 百度可能调整接口；目前已观察到新进程获取 gateway token 时返回“服务器内部错误”，已有进程的缓存 token 仍可调用。因此不能保证首次调用、续期或卸载客户端后的持续可用性。遇到此问题请保留 DuMate 客户端；本插件不会静默改走客户端本地代理。
 
